@@ -1,0 +1,5 @@
+interface:
+  display_name: "Orchestration"
+  short_description: "Run a campaign: dispatch tickets, Inbox, patrol"
+policy:
+  allow_implicit_invocation: false

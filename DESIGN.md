@@ -1,0 +1,12 @@
+# Design rationale
+
+These are general operational lessons, not extra product requirements. The normative workflow is in SKILL.md and its linked instructions.
+
+- Long orchestrator turns let reports, scheduled patrols, and webhook answers accumulate. Delegate long checks and end the orchestrator turn, while execution sessions must wait for their own background work: harness completion may not wake an already ended execution turn.
+- Repeating full reviews after execution delivered Standards/Spec 0/0 duplicated effort and delayed merges. Fix the orchestrator check to SHA, clean worktree, and artifact inventory; return inconsistencies to the original executor.
+- Separate permanent discussion and implementation orchestrators added answer relays and unclear ownership. Keep one orchestrator per Campaign, splitting independent Campaigns only when needed.
+- Queued answers can arrive after a long execution turn has already continued on an obsolete assumption. Send execution messages with steer; preserve the Cursor exception (queue while running, auto when idle), because interruption and failed handover have occurred when steering active Cursor threads. Reports to the short-turn orchestrator remain queued so they can be batched without starving scheduled work.
+- Process-owned resource leases avoid manual request/release traffic and stale administrative ownership. Separate build directories per lane prevent concurrent builds from corrupting shared output.
+- A completed report is not enough without inspectable artifacts; a silent thread is not proof of completion. Record thread IDs, commits, delivery inventory, outstanding reports, and the final initiator obligation.
+- Hardcoded personal names, machine names, and model IDs prevent fresh users from running the workflow. Keep owner display and routing in project settings, discover models/options from T3's catalog, and include the workflow rather than relying on private global instructions.
+- Desktop lanes with independent scrolling left large gaps and squeezed long progress labels. Current desktop layout is a single question column (decisions above acceptance, maximum width 820px) scrolling with the page, plus a sticky independently scrolling messages/progress sidebar; header aligns with centered content. Collapse long background text; put progress statuses over eight characters below the title. Tablet and phone layouts remain unchanged. The authoritative layout/colors are the implementation in inbox-web/public/, not historical prototypes. This documentation change does not redesign the UI.
