@@ -1,4 +1,4 @@
-// 不缓存问答和媒体，避免退出或改答后读到旧数据。
+// 不缓存问答和媒体，避免退出或改答后读到旧数据。基线就没有 app shell 预缓存清单，拆模块后仍不预缓存。
 self.addEventListener('install',event=>event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));
 const languageKey=new URL('__inbox_language__',self.registration.scope).href;

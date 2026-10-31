@@ -108,7 +108,15 @@ export async function main(argv = process.argv.slice(2)) {
   if (command !== 'run' || separator !== '--' || !args.length) throw new Error('lease.mjs [--project <设定.md>] run <池> -- <命令…> | status');
   const lease = await acquire(config, pool);
   try {
-    const child = spawn(args[0], args.slice(1), { stdio: 'inherit', env: { ...process.env, ORCH_LEASE_POOL: pool, ORCH_LEASE_LANE: lease.info.lane, ORCH_LEASE_DIR: lease.info.directory || '' } });
+    // Windows: Node 20.12+ rejects spawn of .cmd/.bat (e.g. bare `npm` → npm.cmd) without a shell (EINVAL).
+    // Only use a shell for those; keep .exe and Linux/macOS on direct spawn so argv/exit codes stay literal.
+    const executable = args[0];
+    const winShell = process.platform === 'win32' && (/\.(cmd|bat)$/i.test(executable) || !path.extname(executable));
+    const child = spawn(executable, args.slice(1), {
+      stdio: 'inherit',
+      shell: winShell,
+      env: { ...process.env, ORCH_LEASE_POOL: pool, ORCH_LEASE_LANE: lease.info.lane, ORCH_LEASE_DIR: lease.info.directory || '' },
+    });
     const signals = ['SIGINT', 'SIGTERM'];
     const forward = signal => child.kill(signal);
     const handlers = signals.map(signal => { const handler = () => forward(signal); process.on(signal, handler); return handler; });

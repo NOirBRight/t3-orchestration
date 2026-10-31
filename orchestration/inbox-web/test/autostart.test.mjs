@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { autostart, macosAgent } from '../autostart.mjs';
+import { autostart, macosAgent, linuxUnit } from '../autostart.mjs';
+
+test('linux unitQuote escapes dollar so systemd does not expand path segments', () => {
+  const unit = linuxUnit('/usr/bin/node', '/opt/$skill/server.mjs', '/home/$user');
+  assert.match(unit, /Environment="INBOX_HOME=\/home\/\$\$user"/);
+  assert.match(unit, /ExecStart="\/usr\/bin\/node" "\/opt\/\$\$skill\/server\.mjs"/);
+  assert.doesNotMatch(unit, /\/home\/\$user[^$]/);
+  assert.doesNotMatch(unit, /\/opt\/\$skill/);
+});
 
 test('macOS plist preserves arguments and XML characters without a shell', () => {
   const plist = macosAgent('/opt/node & tools/node', '/skill/中文 "test"/server.mjs', '/Users/a & b');

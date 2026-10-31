@@ -65,11 +65,14 @@ export class PushService {
     this.keys = JSON.parse(readFileSync(this.keyFile, 'utf8'));
     this.subscriptions = existsSync(this.subscriptionFile) ? JSON.parse(readFileSync(this.subscriptionFile, 'utf8')) : [];
     if (existsSync(this.subscriptionFile)) chmodSync(this.subscriptionFile, 0o600);
-    this.queue = []; this.problems = new Set(); this.jobs = new Set(); this.timer = null;
+    this.queueFile = path.join(privateDir, 'push-queue.json');
+    this.queue = existsSync(this.queueFile) ? JSON.parse(readFileSync(this.queueFile, 'utf8')) : [];
+    this.problems = new Set(); this.jobs = new Set(); this.timer = null; this.stopped = false; this.flushing = null;
   }
   get publicKey() { return this.keys.publicKey; }
-  start() { return this; }
-  async stop() { clearTimeout(this.timer); this.timer = null; await Promise.allSettled([...this.jobs]); }
+  start() { this.stopped = false; this.schedule(); return this; }
+  schedule() { if (this.queue.length && !this.timer && !this.stopped) { this.timer = setTimeout(() => this.flush(), this.batchMs); this.timer.unref?.(); } }
+  async stop() { this.stopped = true; clearTimeout(this.timer); this.timer = null; await Promise.allSettled([...this.jobs]); }
   subscribe(subscription) {
     try {
       validateEndpoint(subscription.endpoint);
@@ -84,7 +87,8 @@ export class PushService {
   enqueue(item) {
     if (item.blocking) return this.dispatch({ title: notification('有挡票的问题等你决定', 'A blocking question needs your decision'), body: item.title, ...this.location(item) }, 'high', [item]);
     this.queue.push(item);
-    if (!this.timer) { this.timer = setTimeout(() => this.flush(), this.batchMs); this.timer.unref?.(); }
+    savePrivate(this.queueFile, this.queue);
+    this.schedule();
   }
   location(item) {
     const url = new URL(this.machine ? '/' : './', this.publicUrl || 'https://localhost/');
@@ -94,15 +98,28 @@ export class PushService {
     return { url: url.href, tag: `${this.machine || ''}:${item.campaign}:${item.id || 'inbox'}` };
   }
   async flush() {
+    if (this.flushing) return this.flushing;
     clearTimeout(this.timer); this.timer = null;
-    const items = this.queue.splice(0); if (!items.length) return;
-    return this.dispatch({ title: notification(`${items.length} 条新题与验收等你处理`, `${items.length} new ${items.length === 1 ? 'question or review needs' : 'questions and reviews need'} your attention`), body: items.slice(0, 3).map(i => i.title).join(' · '), ...this.location(items[0]) }, 'normal', items);
+    const items = [...this.queue]; if (!items.length) return;
+    // Keep the batch on disk until delivery bookkeeping completes. A crash after
+    // sending may repeat a notification; its stable tag replaces the old one.
+    const job = this.send({ title: notification(`${items.length} 条新题与验收等你处理`, `${items.length} new ${items.length === 1 ? 'question or review needs' : 'questions and reviews need'} your attention`), body: items.slice(0, 3).map(i => i.title).join(' · '), ...this.location(items[0]) }, 'normal').then(async result => {
+      await this.onDelivery(items, result);
+      this.queue = this.queue.filter(item => !items.includes(item));
+      savePrivate(this.queueFile, this.queue);
+    }).catch(() => this.onError('网页推送发送失败'));
+    this.flushing = job; this.jobs.add(job);
+    try { await job; } finally { this.jobs.delete(job); this.flushing = null; this.schedule(); }
   }
   problem(item) {
     const key = item.submissionKey || `${item.campaign}:${item.id}:${item.submittedAt || ''}`;
     if (this.problems.has(key)) return;
     this.problems.add(key);
-    const systemBody = item.title === '通知没送到' ? notification(item.title, 'Notification failed') : item.title === '答复超过 15 分钟未读' ? notification(item.title, 'Answer unread for over 15 minutes') : null;
+    const systemBody = {
+      'notify-failed': notification('通知没送到', 'Notification failed'),
+      'unread-15m': notification('答复超过 15 分钟未读', 'Answer unread for over 15 minutes'),
+      'relay-failed': notification('聊天中继没送到', 'Chat relay delivery failed'),
+    }[item.type];
     return this.dispatch({ title: notification('Inbox 送达出了问题', 'Inbox delivery failed'), body: systemBody || item.title || notification('请打开页面查看并重发通知', 'Open Inbox to review and resend the notification'), ...this.location(item) }, 'high');
   }
   dispatch(payload, urgency = 'normal', items = []) {

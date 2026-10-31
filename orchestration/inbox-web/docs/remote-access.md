@@ -2,7 +2,9 @@
 
 Choose one entry method per machine. Save the example as `~/.agents/orchestration/machine.json`, preserving existing Campaigns and peers. Examples use the normal ports; for an isolated trial set `INBOX_HOME` to a new temporary home and replace **both** ports everywhere with unused ports, for example 18780 and 18781. `INBOX_HOME` is a home directory, not the `.agents/orchestration` directory. Start Inbox with `node server.mjs` from the parent directory. Restart it after configuration changes.
 
-Every HTTPS entry targets `http://127.0.0.1:<remotePort>` on the Inbox machine, which requires passphrase login. Do not expose the LAN administration port through a tunnel. Set `publicUrl` to the browser URL, ending in `/`; it is used for origin checks and notification links. Plain HTTP URLs are accepted for development, but remote push needs trusted HTTPS, browser permission, and access to the browser's push provider. Localhost development is a browser exception, not LAN push support.
+Every HTTPS entry targets `http://127.0.0.1:<remotePort>` on the Inbox machine, which requires passphrase login. The remote listener binds only to loopback and expects a reverse proxy in front. Do not expose the LAN administration port through a tunnel. Set `publicUrl` to the browser URL, ending in `/`; it is used for origin checks and notification links. Plain HTTP URLs are accepted for development, but remote push needs trusted HTTPS, browser permission, and access to the browser's push provider. Localhost development is a browser exception, not LAN push support.
+
+The proxy **must overwrite** `X-Forwarded-For` with the real client address (not append to a client-supplied value). Inbox uses the rightmost `X-Forwarded-For` hop for remote login rate limits so one bad actor cannot lock every visitor behind a shared loopback proxy. Valid session cookies are checked before rate limits, so a lockout does not eject an already signed-in owner. See [hub.Caddyfile](hub.Caddyfile) for the overwrite pattern; apply the same rule for Tailscale Serve, Cloudflare Tunnel, or any other reverse proxy.
 
 Inbox does not install or supervise Tailscale, cloudflared, or reverse proxies. Keep those running separately and verify them after login/reboot. `node inbox.mjs health` checks Inbox; `tunnel: disabled` is expected for all modes except managed `ssh-reverse` and says nothing about an external tunnel's health.
 
@@ -61,7 +63,9 @@ A same-machine Caddy site can use:
 
 ```caddyfile
 inbox.example.com {
-    reverse_proxy 127.0.0.1:8781
+    reverse_proxy 127.0.0.1:8781 {
+        header_up X-Forwarded-For {remote_host}
+    }
 }
 ```
 

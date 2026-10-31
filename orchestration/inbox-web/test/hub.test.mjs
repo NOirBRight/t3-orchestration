@@ -10,15 +10,15 @@ import { loadConfig, saveConfig } from '../config.mjs';
 import { Access } from '../access.mjs';
 import { PushService } from '../push.mjs';
 import { createInboxServer } from '../server.mjs';
+import { loadAppSource } from './load-app.mjs';
 
-const source = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
-function frontend(base, cookie, calls) {
+async function frontend(base, cookie, calls) {
   const key = createECDH('prime256v1'); key.generateKeys();
   const subscription = {endpoint:'https://fcm.googleapis.com/shared',keys:{p256dh:key.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}};
   const handlers = {};
   const context = vm.createContext({
     URL, AbortSignal, Uint8Array, atob, Promise, setTimeout, clearTimeout, scrollY: 0,
-    addEventListener(){}, scrollTo(){}, confirm:()=>true, history:{replaceState(){}}, handlers,
+    addEventListener(){}, scrollTo(){}, confirm:()=>true, history:{replaceState(){},pushState(){}}, handlers,
     location: {href:`${base}/?machine=workstation-b&campaign=demo`},
     document:{getElementById:()=>({}),documentElement:{dataset:{}},querySelector:()=>null,addEventListener:(name,handler)=>{handlers[name]=handler;}},
     matchMedia:()=>({matches:false,addEventListener(){}}),
@@ -26,8 +26,7 @@ function frontend(base, cookie, calls) {
     navigator:{language:'zh-CN',serviceWorker:{ready:Promise.resolve({pushManager:{getSubscription:async()=>null,subscribe:async()=>({toJSON:()=>subscription})}})}},
     fetch:async(url, options={})=>{calls.push(new URL(url).pathname); return fetch(url,{...options,headers:{...options.headers,cookie}});},
   });
-  vm.runInContext(fs.readFileSync(new URL('../public/i18n.js', import.meta.url), 'utf8').replaceAll('export ', ''),context);
-  vm.runInContext(source.replace(/^import .*;\r?\n/, '').slice(0,source.replace(/^import .*;\r?\n/, '').lastIndexOf("if ('serviceWorker' in navigator)")),context);
+  await loadAppSource(context, { stopBefore: "if ('serviceWorker' in navigator)" });
   vm.runInContext('render = () => {}; toast = message => { globalThis.notice = message; };',context);
   return context;
 }
@@ -45,7 +44,7 @@ test('双机反代：hub/机器路径、一次登录、跨机答复与一次订�
     if(servers.length)for(const file of ['remote-token','cookie-key','vapid.json'])fs.copyFileSync(path.join(servers[0].config.privateDir,file),path.join(config.privateDir,file));
     const push=new PushService({privateDir:config.privateDir,publicUrl:config.remote.publicUrl,machine:name,fetchImpl:async(url,options)=>{sent.push({name,url,options});return new Response(null,{status:201});}});
     const server=await createInboxServer({config,push});await server.start();servers.push(server);pushes.push(push);
-    server.store.ask('demo',{kind:'decide',title:name,ticket:'#4',askerThreadId:'test',askerLabel:'test',options:[{key:'a',label:'甲'}]});
+    server.store.ask('demo',{kind:'decide',title:name,ticket:'#4',askerThreadId:'test',askerLabel:'test',options:[{key:'a',label:'甲',consequence:'选甲'}]});
   }
   let rootMachine=0;
   proxy=http.createServer((req,res)=>{
@@ -66,7 +65,7 @@ test('双机反代：hub/机器路径、一次登录、跨机答复与一次订�
   assert.equal((await (await fetch(base+'/api/summary',{headers:{cookie,'x-inbox-hub':'1'}})).json()).remote,true);
   for(const file of ['','manifest.webmanifest','sw.js','icon-192.png','icon-512.png'])assert.equal((await fetch(base+'/'+file,{headers:{cookie}})).status,200);
   const manifest=await (await fetch(base+'/manifest.webmanifest',{headers:{cookie}})).json();assert.equal(new URL(manifest.scope,base+'/manifest.webmanifest').pathname,'/');
-  const calls=[],context=frontend(base,cookie,calls);
+  const calls=[],context=await frontend(base,cookie,calls);
   await vm.runInContext('load();',context);
   await vm.runInContext('refreshSummary(true)',context);
   assert.equal(vm.runInContext('machine',context),'workstation-b');
@@ -119,6 +118,15 @@ test('双机反代：hub/机器路径、一次登录、跨机答复与一次订�
   for(const push of pushes){assert.equal(push.subscriptions.length,1);await push.enqueue({campaign:'demo',id:'Q1',title:'题',blocking:true});}
   assert.equal(sent.length,2);assert.equal(pushes[0].subscriptions[0].endpoint,pushes[1].subscriptions[0].endpoint);
   assert.equal(pushes[1].location({campaign:'demo',id:'Q1'}).url,'https://inbox.example.test/?machine=workstation-b&campaign=demo#Q1');
+  // Removal follows the selected peer path and leaves the other machine registered.
+  const withdrawal = servers[1].store.pending('demo').items.find(item => item.id === 'Q1');
+  assert.equal(withdrawal.withdrawalPending, true);
+  servers[1].store.change('demo', 'Q1', 'ack', { submission: withdrawal.submissionId });
+  servers[1].store.change('demo', 'Q1', 'close', { by: 'orchestrator', note: 'Handled cancellation; fixture complete' });
+  const removal = await vm.runInContext("api('api/remove-campaign', {campaign:'demo'}, machineBase('workstation-b'))", context);
+  assert.equal(removal.ok, true); assert.ok(calls.includes('/workstation-b/api/remove-campaign'));
+  assert.equal(servers[1].config.campaigns.length, 0); assert.equal(servers[0].config.campaigns.length, 1);
+  assert.ok(fs.existsSync(path.join(home, 'workstation-b', 'campaign', 'inbox.json')));
   rootMachine=1;assert.equal((await (await fetch(base+'/api/summary',{headers:{cookie}})).json()).name,'workstation-b');
   new Access(servers[0].config.privateDir).rotate();
   for(const file of ['remote-token','cookie-key'])fs.copyFileSync(path.join(servers[0].config.privateDir,file),path.join(servers[1].config.privateDir,file));

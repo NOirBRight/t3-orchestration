@@ -31,7 +31,7 @@ test('关键动态中文措辞保持，英文参数插入完整且不改用户�
     ['unreadDetail', ['20 分钟'], '编排 20 分钟还没读，可能在忙或卡住了。'],
     ['submittedFailed', [2], '已提交 2 项，通知没送到，可重发'], ['submittedQuiet', [2], '已提交 2 项，没配通知，等编排巡检'],
     ['submitted', [2], '已提交 2 项，已通知编排'], ['pending', [2], '2 待答'],
-    ['selected', ['A、B'], '已选 A、B，再点一次取消'], ['older', [3], '更早完成 3 张'], ['blockingCount', [2], '2 题挡住票了'],
+    ['selected', ['A、B'], '已选 A、B，再点一次取消'], ['blockingCount', [2], '2 题挡住票了'],
   ];
   for (const [key, values, expected] of cases) assert.equal(translate('zh', key, ...values), expected, key);
   assert.equal(translate('zh', 'hoursMinutes', 2, 0), '2 小时');

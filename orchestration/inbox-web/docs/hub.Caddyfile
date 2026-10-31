@@ -1,18 +1,23 @@
 # Both loopback listeners must forward to the respective machine's remotePort.
+# Overwrite X-Forwarded-For with the real client (do not append). Inbox remote
+# rate limits use the rightmost XFF hop; a shared proxy IP would lock everyone out.
 example.com {
     handle_path /machine-a/* {
         reverse_proxy 127.0.0.1:9781 {
             header_up X-Inbox-Hub 0
+            header_up X-Forwarded-For {remote_host}
         }
     }
     handle_path /machine-b/* {
         reverse_proxy 127.0.0.1:9782 {
             header_up X-Inbox-Hub 0
+            header_up X-Forwarded-For {remote_host}
         }
     }
     handle {
         reverse_proxy 127.0.0.1:9781 127.0.0.1:9782 {
             header_up X-Inbox-Hub 1
+            header_up X-Forwarded-For {remote_host}
             lb_policy first
             fail_duration 10s
             lb_try_duration 5s

@@ -34,7 +34,7 @@ try {
   const lan = await port(); let remote; do { remote = await port(); } while (remote === lan);
   if ([lan, remote].some(value => [8780, 8781].includes(value))) throw new Error('Retry trial to choose isolated ports.');
   record.ports = [lan, remote];
-  const answers = { machine: { name: 'isolated-setup-trial', port: lan, remotePort: remote, remote: { type: 'none' } }, project: { root: path.join(home, 'project'), storage: path.join(home, 'campaigns'), routing: 'Trial only: no dispatch. Live profiles must be selected from the T3 catalog.', permissions: 'No push, no GitHub issues, no real dispatch.', tests: 'node --test' } };
+  const answers = { machine: { name: 'isolated-setup-trial', port: lan, remotePort: remote, remote: { type: 'none' } }, project: { root: path.join(home, 'project'), storage: path.join(home, 'campaigns'), permissions: 'No push, no GitHub issues, no real dispatch.', tests: 'node --test' } };
   const answersFile = path.join(home, 'answers.json'); await writeFile(answersFile, JSON.stringify(answers));
   let enabled = false;
   const stop = async () => { if (server) { await server.stop(); server = null; } };

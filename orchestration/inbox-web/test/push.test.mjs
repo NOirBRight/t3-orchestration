@@ -25,6 +25,19 @@ test('VAPID 使用 ES256、接收端 origin 和十二小时有效期', () => {
 
 function subscription() { const key = createECDH('prime256v1'); key.generateKeys(); return { endpoint: 'https://fcm.googleapis.com/endpoint', keys: { p256dh: key.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') }, receiver: key }; }
 
+test('queued notifications survive restart and are removed only after delivery', async t => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'inbox-push-restart-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  let sent = 0;
+  const options = { privateDir: dir, publicUrl: 'https://inbox.example.test/', fetchImpl: async () => { sent++; return new Response(null, {status:201}); } };
+  const first = new PushService(options); first.subscribe(subscription());
+  first.enqueue({ campaign:'demo', id:'Q1', title:'Pending' }); await first.stop();
+  const second = new PushService(options); t.after(() => second.stop());
+  assert.equal(second.queue.length, 1); second.start(); await second.flush();
+  assert.equal(sent, 1);
+  const third = new PushService(options); t.after(() => third.stop());
+  assert.equal(third.queue.length, 0); await third.flush(); assert.equal(sent, 1);
+});
+
 function decryptPayload(body, subscription) {
   const hmac = (key, value) => createHmac('sha256', key).update(value).digest();
   const expand = (key, info, size) => hmac(key, Buffer.concat([Buffer.from(info), Buffer.from([1])])).subarray(0, size);
@@ -88,12 +101,15 @@ test('送达异常的系统正文双语，用户题目不翻译', async t => {
   const sent = [];
   const service = new PushService({ privateDir: dir, publicUrl: 'https://inbox.example.test/', fetchImpl: async (url, options) => { sent.push(decryptPayload(options.body, url === zh.endpoint ? zh : en)); return new Response(null, { status: 201 }); } });
   t.after(() => service.stop()); service.subscribe(zh); service.subscribe(en);
-  for (const [title, english] of [['通知没送到', 'Notification failed'], ['答复超过 15 分钟未读', 'Answer unread for over 15 minutes']]) {
-    await service.problem({ campaign: 'c', id: title, title });
+  for (const [type, title, english] of [['notify-failed', '通知没送到', 'Notification failed'], ['unread-15m', '答复超过 15 分钟未读', 'Answer unread for over 15 minutes']]) {
+    await service.problem({ campaign: 'c', id: title, type, title });
     assert.deepEqual(sent.splice(0).map(payload => payload.body), [title, english]);
     await service.enqueue({ campaign: 'c', id: title, title, blocking: true });
     assert.deepEqual(sent.splice(0).map(payload => payload.body), [title, title]);
   }
+  // Title text alone must not select the system bilingual body (regression for the old Chinese-string match).
+  await service.problem({ campaign: 'c', id: 'title-only', title: '通知没送到' });
+  assert.deepEqual(sent.splice(0).map(payload => payload.body), ['通知没送到', '通知没送到']);
   const title = '通知没送到：这是用户自写的正文';
   await service.problem({ campaign: 'c', id: 'custom', title });
   assert.deepEqual(sent.map(payload => payload.body), [title, title]);

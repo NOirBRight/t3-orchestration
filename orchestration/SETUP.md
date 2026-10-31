@@ -24,9 +24,11 @@ Ask for machine name, LAN/remote ports (defaults 8780/8781), remote method, and 
 
 LAN login defaults to required (`lanTrustSubnet: false`). Offer bypass only if the owner explicitly wants to trust the local subnet. For plain LAN HTTP, login works but push/PWA installation may be unavailable: choose trusted HTTPS for the phone experience. Never claim push is verified on plain LAN HTTP.
 
-For the project ask Campaign storage per machine, disk threshold, capacity/design capacity, owner display name, permissions, resource pools and tests. Read [PROJECT.md](PROJECT.md); choose concrete orchestrator, primary/fallback and review profiles from the live catalog, including supported options. Do not use placeholder profiles for live dispatch.
+For the project ask Campaign storage per machine, disk threshold, owner display name, permissions, resource pools and tests. Optionally ask whether to enable a housekeeping session (HOUSEKEEPING.md; lazy-created later) and whether the orchestrator is a T3 thread or an external agent (EXTERNAL-ORCHESTRATOR.md). Read [PROJECT.md](PROJECT.md) for those fields. **Do not** put concurrency limits or dispatch routes in project settings: they live in Inbox routing settings (decision 44; see [schema.md](inbox-web/schema.md#routing-and-capacity-routingjson)).
 
-Write the answers to a temporary **public** JSON file; it must contain no passphrases, keys, subscriptions, webhook URLs or tunnel credentials. Example (routing text must be replaced with actual agreed profiles):
+**Routing and capacity (Inbox):** check `~/.agents/orchestration/routing.json` (under `INBOX_HOME` when set). If it is missing, run `node <skill-dir>/inbox-web/inbox.mjs routing-import` to seed the built-in 2026-10-23g table (execution 8 / design 2). Customize global or host routes, limits, and quota in the Inbox settings page, never by hand-editing that file. For Campaign-only overrides, use the Campaign layer of the same page; it stores only the changed fields in `<campaign-dir>/routing.json`. Never copy the route table into project settings. Optional setup answers may include `campaignRouting: { "dir": "<campaign-dir>", "limits": {…}, "routes": {…} }` to write that override file. Call `orchestrator_capabilities` and keep a catalog snapshot (`catalog-write`) so settings can validate picks; do not use placeholder profiles for live dispatch.
+
+Write the answers to a temporary **public** JSON file; it must contain no passphrases, keys, subscriptions, webhook URLs or tunnel credentials. Example:
 
 ```json
 {
@@ -36,8 +38,7 @@ Write the answers to a temporary **public** JSON file; it must contain no passph
   },
   "project": {
     "root": "/absolute/project", "storage": "/absolute/campaign-storage",
-    "diskWarningGB": 10, "capacity": 8, "designCapacity": 1, "owner": "you",
-    "routing": "Concrete orchestrator and primary/fallback profiles for design, research, code, adjudication and review, with providerInstanceId, model and explicit options.",
+    "diskWarningGB": 10, "owner": "you",
     "permissions": "Ask before push, release and ticket closure.",
     "resources": {"resourceNamespace": "my-project", "resourcePools": {}},
     "tests": "The project's actual test commands and allowed short post-merge checks."
@@ -45,7 +46,7 @@ Write the answers to a temporary **public** JSON file; it must contain no passph
 }
 ```
 
-On Windows use absolute Windows paths with JSON escaping (or forward slashes). `project` may be omitted to configure the machine first; rerun with project answers later. Existing project settings with different contents are preserved: read and edit them with owner-agreed values instead of replacing them. Existing AGENTS.md content is kept and the project-settings link is added once. Existing machine Campaigns/peers are retained.
+On Windows use absolute Windows paths with JSON escaping (or forward slashes). `project` may be omitted to configure the machine first; rerun with project answers later. Existing project settings with different contents are preserved: read and edit them with owner-agreed values instead of replacing them. Existing AGENTS.md content is kept and the project-settings link is added once. Existing machine Campaigns/peers are retained. Legacy `capacity` / `designCapacity` / `routing` keys in an answers file are ignored for project settings.
 
 ## 3. Configure, install and check
 
@@ -55,7 +56,7 @@ node <skill-dir>/inbox-web/inbox.mjs doctor
 node <skill-dir>/inbox-web/inbox.mjs health
 ```
 
-The command writes `~/.agents/orchestration/machine.json`, project settings and the AGENTS.md link, installs autostart through the existing platform installer, restarts Inbox to apply configuration, and waits for matching health. Repeat the same answers safely; paths and unrelated registrations remain intact. A failed health check leaves the public settings for repair. Use status and the [Inbox README](inbox-web/README.md) service-manager instructions. Verify service health after a new login/reboot separately. Delete the temporary answer file when no longer needed.
+The command writes `~/.agents/orchestration/machine.json`, project settings and the AGENTS.md link, installs autostart through the existing platform installer, restarts Inbox to apply configuration, and waits for matching health. It does **not** create `routing.json`; when that file is missing the JSON result includes `routing.present: false` and `routing.fix` pointing at `routing-import`—run that command before live dispatch. Repeat the same answers safely; paths and unrelated registrations remain intact. A failed health check leaves the public settings for repair. Use status and the [Inbox README](inbox-web/README.md) service-manager instructions. Verify service health after a new login/reboot separately. Delete the temporary answer file when no longer needed.
 
 For an isolated trial set `HOME`, `USERPROFILE` on Windows, and `INBOX_HOME` to a newly allocated temporary directory, use a separate skills copy and **two unused non-default ports**. Setting HOME alone does not sandbox system service managers: use the [trial runner](scripts/test/setup-trial.mjs), whose installer runner is simulated, instead of invoking real install. It starts/stops a temporary local server and repeats the prefilled CLI setup path twice. Run `node <skill-dir>/scripts/test/setup-trial.mjs`; only its public JSON record is retained. To test an actual skills CLI installation and companion detection, allocate the isolated home with prefix `orchestration-release-trial-`, install there with `--copy`, and run the installed trial with `--installed`. That mode preserves the caller-allocated isolated home for inspection instead of deleting it. It expects `gh auth` to fail in the empty user config. Do not install into another user's real home, modify existing services, or treat this simulation as login/reboot or fresh-system acceptance.
 
@@ -67,7 +68,7 @@ In a local, unrecorded interactive terminal run:
 node <skill-dir>/inbox-web/inbox.mjs add-device
 ```
 
-This creates a single-use, five-minute login QR without rotating the passphrase or invalidating existing sessions. It expires on service restart. An already logged-in device can instead use **Add device** in the header and privately copy the short-lived link. It refuses redirected output. Tokens and login URLs pass from the local admin response to the encoder in memory only. Never use `rotate-token` in an agent transcript to retrieve a URL, paste a login link into chat, or take a QR screenshot. Device links belong to the issuing machine; preserve its path prefix when sharing from a hub. `phone-qr` remains an explicit passphrase-rotation recovery action, coordinated with other machines first.
+This creates a single-use, five-minute login QR without rotating the passphrase or invalidating existing sessions. It expires on service restart. An already logged-in device can instead use **Add device** in the header on desktop, or in the gear/settings panel on a phone and privately copy the short-lived link. It refuses redirected output. Tokens and login URLs pass from the local admin response to the encoder in memory only. Never use `rotate-token` in an agent transcript to retrieve a URL, paste a login link into chat, or take a QR screenshot. Device links belong to the issuing machine; preserve its path prefix when sharing from a hub. `phone-qr` remains an explicit passphrase-rotation recovery action, coordinated with other machines first.
 
 For recovery with `phone-qr`, optional `--png <new-private-path.png>` saves a new PNG with mode 0600 (Windows home ACLs still apply); it refuses overwrite. A QR image is itself a credential: keep it private, scan locally and delete that exact file afterwards. Do not attach it to logs, tickets, reviews or deliveries. The encoder supports up to 271 UTF-8 bytes; use a shorter public entry URL if necessary. This implementation uses Node's standard library only. The old external Python helpers need not be removed.
 

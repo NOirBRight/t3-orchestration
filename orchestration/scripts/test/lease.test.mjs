@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -69,6 +69,34 @@ test('CLI status 列所有池与空道，启动失败归还资源', async t => {
   const failed = spawn(process.execPath, [script, '--project', file, 'run', 'build', '--', `missing-command-${randomUUID()}`], { stdio: 'ignore' });
   assert.equal((await once(failed, 'exit'))[0], 1);
   const lease = await acquire(pools, 'build'); await lease.release();
+});
+
+test('Windows 上 lease run 能启动 .cmd（不经 shell 会 EINVAL）', { skip: process.platform !== 'win32' }, async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'orch-lease-cmd-'));
+  const file = path.join(dir, 'project.md'), pools = config();
+  const cmd = path.join(dir, 'ok.cmd');
+  const bin = path.join(dir, 'bin');
+  await writeFile(file, '```json\n' + JSON.stringify(pools) + '\n```\n');
+  await writeFile(cmd, '@echo off\r\necho CMD_OK\r\nexit /b 0\r\n');
+  await mkdir(bin);
+  await writeFile(path.join(bin, 'orchleaseok.cmd'), '@echo off\r\necho BARE_OK\r\nexit /b 0\r\n');
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const child = spawn(process.execPath, [script, '--project', file, 'run', 'build', '--', cmd], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  child.stderr.on('data', chunk => { output += chunk; });
+  assert.equal((await once(child, 'exit'))[0], 0, output);
+  assert.match(output, /CMD_OK/);
+  // Bare name (like npm) resolves to .cmd via PATH and needs shell on Windows.
+  const bare = spawn(process.execPath, [script, '--project', file, 'run', 'build', '--', 'orchleaseok'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH || ''}` },
+  });
+  let bareOut = '';
+  bare.stdout.on('data', chunk => { bareOut += chunk; });
+  bare.stderr.on('data', chunk => { bareOut += chunk; });
+  assert.equal((await once(bare, 'exit'))[0], 0, bareOut);
+  assert.match(bareOut, /BARE_OK/);
 });
 
 test('macOS 遗留 socket 文件并发回收只交给一个领取者', { skip: process.platform !== 'darwin' }, async t => {
